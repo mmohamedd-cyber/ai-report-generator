@@ -1,0 +1,780 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>AI Report Generator (Marks + QuestionMap)</title>
+
+  <!-- SheetJS (XLSX) -->
+  <script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+
+  <style>
+    :root{
+      --bg:#f7f7fb;
+      --card:#ffffff;
+      --ink:#111827;
+      --muted:#6b7280;
+      --line:#e5e7eb;
+      --accent:#2563eb;
+      --accent2:#0ea5e9;
+      --good:#16a34a;
+      --mid:#f59e0b;
+      --low:#ef4444;
+      --shadow:0 10px 30px rgba(17,24,39,.08);
+      --r:16px;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono","Courier New", monospace;
+      --sans: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+    }
+    *{box-sizing:border-box}
+    body{margin:0;font-family:var(--sans);background:var(--bg);color:var(--ink)}
+    header{
+      position:sticky;top:0;z-index:10;
+      background:rgba(247,247,251,.92);
+      backdrop-filter: blur(10px);
+      border-bottom:1px solid var(--line);
+      padding:14px 16px;
+    }
+    .wrap{max-width:1180px;margin:0 auto;padding:0 12px}
+    .topbar{display:flex;gap:12px;align-items:center;justify-content:space-between;flex-wrap:wrap}
+    h1{margin:0;font-size:18px;font-weight:800;letter-spacing:.2px}
+    .sub{color:var(--muted);font-size:12.5px}
+    main{padding:18px 0 40px}
+    .grid{display:grid;grid-template-columns: 1.1fr .9fr; gap:14px}
+    @media (max-width: 980px){ .grid{grid-template-columns:1fr} }
+    .card{
+      background:var(--card);
+      border:1px solid var(--line);
+      border-radius:var(--r);
+      box-shadow:var(--shadow);
+      padding:14px;
+    }
+    .card h2{margin:0 0 10px;font-size:14px}
+    .row{display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+    .row > *{flex:0 0 auto}
+    .btn{
+      border:1px solid var(--line);
+      background:#fff;
+      color:var(--ink);
+      padding:10px 12px;
+      border-radius:12px;
+      cursor:pointer;
+      font-weight:700;
+      transition:.15s;
+    }
+    .btn:hover{transform: translateY(-1px);border-color:#cbd5e1}
+    .btn.primary{
+      background:linear-gradient(180deg, #2f78ff, #2563eb);
+      color:#fff;border-color:#1d4ed8;
+    }
+    .btn.primary:hover{filter:brightness(1.03)}
+    .btn.danger{
+      background:#fff;
+      border-color:#fecaca;
+      color:#b91c1c;
+    }
+    .btn:disabled{opacity:.55;cursor:not-allowed;transform:none}
+    input[type="file"]{
+      border:1px dashed #cbd5e1;background:#fff;padding:10px;border-radius:12px;
+    }
+    .pill{
+      display:inline-flex;gap:6px;align-items:center;
+      border:1px solid var(--line);
+      background:#fff;
+      padding:8px 10px;border-radius:999px;
+      font-size:12px;color:var(--muted);
+    }
+    .pill b{color:var(--ink)}
+    .kpi{display:flex;gap:10px;flex-wrap:wrap}
+    .kpi .pill{background:#fafafa}
+    .muted{color:var(--muted)}
+    .small{font-size:12px}
+    .mono{font-family:var(--mono)}
+    .two{display:grid;grid-template-columns:1fr 1fr; gap:12px}
+    @media (max-width: 720px){ .two{grid-template-columns:1fr} }
+    textarea, select, input[type="number"], input[type="text"]{
+      width:100%;
+      border:1px solid var(--line);
+      border-radius:12px;
+      padding:10px 12px;
+      font-family:var(--mono);
+      font-size:12.5px;
+      outline:none;
+      background:#fff;
+    }
+    textarea{min-height:190px;resize:vertical}
+    table{width:100%;border-collapse:collapse}
+    th, td{border-bottom:1px solid var(--line); padding:10px 8px; text-align:left; vertical-align:top}
+    th{font-size:12px;color:var(--muted);font-weight:800}
+    td{font-size:13px}
+    .badge{
+      display:inline-flex;align-items:center;gap:6px;
+      padding:6px 10px;border-radius:999px;font-size:12px;font-weight:800;
+      border:1px solid var(--line);
+      background:#fff;
+    }
+    .b-good{color:var(--good);border-color:#bbf7d0;background:#f0fdf4}
+    .b-mid{color:#b45309;border-color:#fde68a;background:#fffbeb}
+    .b-low{color:var(--low);border-color:#fecaca;background:#fef2f2}
+    .status{
+      padding:8px 10px;border-radius:12px;border:1px solid var(--line);background:#fff;
+      font-size:12.5px;color:var(--muted)
+    }
+    .right{margin-left:auto}
+    .sp{height:10px}
+    .note{
+      background:#f8fafc;border:1px solid #e2e8f0;color:#475569;
+      padding:10px 12px;border-radius:12px;font-size:12.5px;line-height:1.35
+    }
+  </style>
+</head>
+
+<body>
+<header>
+  <div class="wrap">
+    <div class="topbar">
+      <div>
+        <h1>AI Report Generator</h1>
+        <div class="sub">Upload an Excel file with two sheets: <b>Marks</b> and <b>QuestionMap</b>. Generates topic-based comments (no numbers).</div>
+      </div>
+      <div class="kpi" id="kpis">
+        <span class="pill"><b id="kpiStudents">0</b> students</span>
+        <span class="pill"><b id="kpiQuestions">0</b> questions</span>
+        <span class="pill"><b id="kpiTopics">0</b> topics</span>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main>
+  <div class="wrap">
+    <div class="grid">
+      <!-- LEFT: Data + Results -->
+      <section class="card">
+        <h2>1) Upload & Process</h2>
+
+        <div class="row">
+          <input id="file" type="file" accept=".xlsx,.xls" />
+          <button class="btn primary" id="btnLoad">Load Excel</button>
+          <button class="btn danger" id="btnReset" disabled>Reset</button>
+          <span class="status" id="status">No file loaded.</span>
+        </div>
+
+        <div class="sp"></div>
+
+        <div class="two">
+          <div>
+            <label class="small muted"><b>AI endpoint</b> (your backend; keeps API key private)</label>
+            <input id="endpoint" type="text" value="/api/comment" />
+            <div class="small muted" style="margin-top:6px">
+              The front-end will POST to this URL. Example payload includes first name + topic bands (no marks).
+            </div>
+          </div>
+          <div>
+            <label class="small muted"><b>Parallel requests</b> (keep low for stability)</label>
+            <input id="concurrency" type="number" min="1" max="5" value="1" />
+            <div class="small muted" style="margin-top:6px">
+              Recommendation: <b>1</b>. Prevents connection issues on some networks/browsers.
+            </div>
+          </div>
+        </div>
+
+        <div class="sp"></div>
+
+        <div class="two">
+          <div>
+            <label class="small muted"><b>Band thresholds</b> (internal only)</label>
+            <div class="row">
+              <span class="badge b-good">Strong ≥</span>
+              <input id="thrStrong" type="number" step="0.05" min="0" max="1" value="0.80" style="max-width:140px" />
+              <span class="badge b-low">Focus &lt;</span>
+              <input id="thrFocus" type="number" step="0.05" min="0" max="1" value="0.40" style="max-width:140px" />
+            </div>
+            <div class="small muted" style="margin-top:6px">
+              Students never see numbers—these rules are only used to label topics.
+            </div>
+          </div>
+          <div>
+            <label class="small muted"><b>Generate for</b></label>
+            <div class="row">
+              <button class="btn primary" id="btnGenerateSelected" disabled>Generate (Selected)</button>
+              <button class="btn" id="btnGenerateAll" disabled>Generate (All)</button>
+              <button class="btn" id="btnStop" disabled>Stop</button>
+            </div>
+            <div class="small muted" style="margin-top:6px">
+              Output has <b>no marks, no percentages</b>, and uses the student’s <b>first name</b>.
+            </div>
+          </div>
+        </div>
+
+        <div class="sp"></div>
+
+        <div class="note">
+          <b>Expected Excel format</b><br/>
+          Sheet <b>Marks</b>: columns <span class="mono">Name</span>, <span class="mono">Q01</span>… (marks achieved per question).<br/>
+          Sheet <b>QuestionMap</b>: columns <span class="mono">Question</span> (e.g., Q01), <span class="mono">Topic</span>, <span class="mono">MaxMarks</span>.
+        </div>
+
+        <div class="sp"></div>
+
+        <h2>2) Student Results</h2>
+        <div class="row">
+          <span class="pill"><b>Tip:</b> click a row to select/deselect.</span>
+          <span class="right"></span>
+          <button class="btn" id="btnExportCSV" disabled>Export CSV</button>
+          <button class="btn" id="btnCopyTSV" disabled>Copy (Excel)</button>
+        </div>
+
+        <div class="sp"></div>
+
+        <div style="overflow:auto; border:1px solid var(--line); border-radius:14px;">
+          <table id="table">
+            <thead>
+              <tr>
+                <th style="width:34px">Sel</th>
+                <th style="min-width:220px">Student</th>
+                <th style="min-width:260px">Strength topics</th>
+                <th style="min-width:260px">Developing topics</th>
+                <th style="min-width:260px">Focus topics</th>
+                <th style="min-width:360px">AI comment</th>
+              </tr>
+            </thead>
+            <tbody id="tbody">
+              <tr><td colspan="6" class="muted">Load an Excel file to see students here.</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <!-- RIGHT: Prompt Preview -->
+      <aside class="card">
+        <h2>Prompt Preview (what gets sent to your backend)</h2>
+        <div class="small muted">
+          This is the <b>exact payload</b> posted to your endpoint. It contains topic labels only (no marks/percentages).
+        </div>
+
+        <div class="sp"></div>
+
+        <label class="small muted"><b>Selected student</b></label>
+        <select id="studentSelect" disabled></select>
+
+        <div class="sp"></div>
+
+        <label class="small muted"><b>Payload</b></label>
+        <textarea id="payload" readonly>{}</textarea>
+
+        <div class="sp"></div>
+
+        <label class="small muted"><b>Backend response (latest)</b></label>
+        <textarea id="backendResp" readonly></textarea>
+
+        <div class="sp"></div>
+
+        <div class="note">
+          <b>Backend contract</b><br/>
+          Your server should accept: <span class="mono">studentFirstName</span>, <span class="mono">strengthTopics</span>, <span class="mono">developingTopics</span>, <span class="mono">focusTopics</span><br/>
+          and return: <span class="mono">{ "comment": "..." }</span>
+        </div>
+      </aside>
+    </div>
+  </div>
+</main>
+
+<script>
+/* -----------------------------
+   State
+------------------------------ */
+let STATE = {
+  fileName: "",
+  students: [],      // [{id, name, firstName, topics:{strength:[], developing:[], focus:[]}, comment:""}]
+  qmap: {},          // { Q01: {topic, maxMarks} }
+  topicsList: [],    // unique
+  stopRequested: false
+};
+
+/* -----------------------------
+   Helpers
+------------------------------ */
+const $ = (id) => document.getElementById(id);
+const setStatus = (msg) => { $("status").textContent = msg; };
+
+function safeStr(v){ return (v ?? "").toString().trim(); }
+
+function firstNameFromFullName(full){
+  const t = safeStr(full).split(/\s+/).filter(Boolean);
+  return t.length ? t[0] : "Student";
+}
+
+function uniq(arr){
+  return Array.from(new Set(arr.filter(Boolean)));
+}
+
+function clamp(n, a, b){ return Math.max(a, Math.min(b, n)); }
+
+function toCSV(rows){
+  const esc = (s) => `"${String(s ?? "").replaceAll('"','""')}"`;
+  const headers = Object.keys(rows[0] || {});
+  const lines = [headers.map(esc).join(",")];
+  for (const r of rows){
+    lines.push(headers.map(h => esc(r[h])).join(","));
+  }
+  return lines.join("\n");
+}
+
+function toTSV(rows){
+  const headers = Object.keys(rows[0] || {});
+  const lines = [headers.join("\t")];
+  for (const r of rows){
+    lines.push(headers.map(h => String(r[h] ?? "")).join("\t"));
+  }
+  return lines.join("\n");
+}
+
+/* -----------------------------
+   Excel Reading
+------------------------------ */
+async function readExcel(file){
+  const buf = await file.arrayBuffer();
+  const wb = XLSX.read(buf, { type: "array" });
+
+  if (!wb.SheetNames.includes("Marks") || !wb.SheetNames.includes("QuestionMap")){
+    throw new Error(`Missing sheets. Found: ${wb.SheetNames.join(", ")}. Required: Marks, QuestionMap.`);
+  }
+
+  const marks = XLSX.utils.sheet_to_json(wb.Sheets["Marks"], { defval: "" });
+  const qmapRows = XLSX.utils.sheet_to_json(wb.Sheets["QuestionMap"], { defval: "" });
+
+  // Build question map
+  const qmap = {};
+  const topics = [];
+  for (const r of qmapRows){
+    const q = safeStr(r.Question);
+    const topic = safeStr(r.Topic);
+    const max = Number(r.MaxMarks);
+    if (!q || !topic || !Number.isFinite(max) || max <= 0) continue;
+    qmap[q] = { topic, maxMarks: max };
+    topics.push(topic);
+  }
+  if (!Object.keys(qmap).length){
+    throw new Error("QuestionMap is empty or invalid. Expected columns: Question, Topic, MaxMarks.");
+  }
+
+  // Validate Marks
+  if (!marks.length) throw new Error("Marks sheet has no rows.");
+  const firstRow = marks[0];
+  if (!("Name" in firstRow)) throw new Error("Marks sheet must contain a 'Name' column.");
+
+  // Identify question columns in Marks that exist in QuestionMap
+  const markCols = Object.keys(firstRow).filter(k => k !== "Name");
+  const qCols = markCols.filter(q => qmap[q]);
+  if (!qCols.length){
+    throw new Error("No question columns in Marks match QuestionMap (e.g., Q01, Q02...).");
+  }
+
+  return { marks, qmap, qCols, topics: uniq(topics) };
+}
+
+/* -----------------------------
+   Topic Banding Logic (no numbers shown to students)
+------------------------------ */
+function bandForQuestion(score, maxMarks, thrStrong, thrFocus){
+  const s = Number(score);
+  if (!Number.isFinite(s)) return "developing";
+  const ratio = maxMarks > 0 ? (s / maxMarks) : 0;
+  if (ratio >= thrStrong) return "strong";
+  if (ratio < thrFocus) return "focus";
+  return "developing";
+}
+
+function buildStudentTopics(marksRow, qCols, qmap, thrStrong, thrFocus){
+  // Aggregate per topic
+  const byTopic = {}; // topic -> {strong, developing, focus}
+  for (const q of qCols){
+    const { topic, maxMarks } = qmap[q];
+    if (!byTopic[topic]) byTopic[topic] = { strong: 0, developing: 0, focus: 0 };
+    const band = bandForQuestion(marksRow[q], maxMarks, thrStrong, thrFocus);
+    byTopic[topic][band] += 1;
+  }
+
+  // Score topics for ranking
+  const topicStats = Object.entries(byTopic).map(([topic, c]) => {
+    const total = c.strong + c.developing + c.focus;
+    const strengthScore = (c.strong * 2) + (c.developing * 1) + (c.focus * 0);
+    const focusScore = (c.focus * 2) + (c.developing * 1) + (c.strong * 0);
+    return { topic, ...c, total, strengthScore, focusScore };
+  });
+
+  // Sort to choose top 3 strengths and focus
+  topicStats.sort((a,b) => b.strengthScore - a.strengthScore || b.strong - a.strong);
+  const strengthTopics = topicStats.slice(0, 3).map(t => t.topic);
+
+  const focusSorted = [...topicStats].sort((a,b) => b.focusScore - a.focusScore || b.focus - a.focus);
+  const focusTopics = focusSorted.filter(t => t.focus > 0).slice(0, 3).map(t => t.topic);
+
+  // Developing = topics not already in strengths/focus, where there is at least some "developing"
+  const developingTopics = topicStats
+    .filter(t => !strengthTopics.includes(t.topic) && !focusTopics.includes(t.topic) && t.developing > 0)
+    .slice(0, 2)
+    .map(t => t.topic);
+
+  return { strengthTopics, developingTopics, focusTopics };
+}
+
+/* -----------------------------
+   UI Rendering
+------------------------------ */
+function updateKPIs(){
+  $("kpiStudents").textContent = STATE.students.length;
+  $("kpiQuestions").textContent = Object.keys(STATE.qmap).length;
+  $("kpiTopics").textContent = STATE.topicsList.length;
+}
+
+function renderStudentsTable(){
+  const tbody = $("tbody");
+  tbody.innerHTML = "";
+
+  if (!STATE.students.length){
+    tbody.innerHTML = `<tr><td colspan="6" class="muted">No students loaded.</td></tr>`;
+    return;
+  }
+
+  for (const s of STATE.students){
+    const tr = document.createElement("tr");
+    tr.dataset.id = s.id;
+
+    const sel = document.createElement("td");
+    sel.innerHTML = `<input type="checkbox" ${s.selected ? "checked" : ""} />`;
+    sel.querySelector("input").addEventListener("change", (e) => {
+      s.selected = e.target.checked;
+      syncSelectedStudent();
+    });
+
+    const name = document.createElement("td");
+    name.innerHTML = `<div><b>${escapeHtml(s.name)}</b></div><div class="small muted">First name: ${escapeHtml(s.firstName)}</div>`;
+
+    const tdStrength = document.createElement("td");
+    tdStrength.innerHTML = listPills(s.topics.strengthTopics, "b-good");
+
+    const tdDev = document.createElement("td");
+    tdDev.innerHTML = listPills(s.topics.developingTopics, "b-mid");
+
+    const tdFocus = document.createElement("td");
+    tdFocus.innerHTML = listPills(s.topics.focusTopics, "b-low");
+
+    const tdComment = document.createElement("td");
+    tdComment.innerHTML = s.comment
+      ? `<div>${escapeHtml(s.comment)}</div>`
+      : `<span class="muted small">No comment yet.</span>`;
+
+    // Row click toggles selection
+    tr.addEventListener("click", (e) => {
+      if (e.target.tagName.toLowerCase() === "input") return;
+      s.selected = !s.selected;
+      sel.querySelector("input").checked = s.selected;
+      syncSelectedStudent();
+    });
+
+    tr.appendChild(sel);
+    tr.appendChild(name);
+    tr.appendChild(tdStrength);
+    tr.appendChild(tdDev);
+    tr.appendChild(tdFocus);
+    tr.appendChild(tdComment);
+    tbody.appendChild(tr);
+  }
+}
+
+function renderStudentSelect(){
+  const sel = $("studentSelect");
+  sel.innerHTML = "";
+  for (const s of STATE.students){
+    const opt = document.createElement("option");
+    opt.value = s.id;
+    opt.textContent = s.name;
+    sel.appendChild(opt);
+  }
+  sel.disabled = STATE.students.length === 0;
+
+  sel.onchange = () => {
+    const id = sel.value;
+    const s = STATE.students.find(x => x.id === id);
+    if (s){
+      for (const st of STATE.students) st.selected = false;
+      s.selected = true;
+      renderStudentsTable();
+      updatePromptPreview();
+    }
+  };
+}
+
+function syncSelectedStudent(){
+  // if exactly one selected, show in preview
+  const selected = STATE.students.filter(s => s.selected);
+  if (selected.length === 1){
+    $("studentSelect").value = selected[0].id;
+  }
+  updatePromptPreview();
+  renderStudentsTable();
+}
+
+function updatePromptPreview(){
+  const selId = $("studentSelect").value;
+  const selected = STATE.students.find(s => s.id === selId) || STATE.students.find(s => s.selected) || null;
+
+  const payload = selected ? makePayload(selected) : {};
+  $("payload").value = JSON.stringify(payload, null, 2);
+}
+
+function listPills(items, cls){
+  if (!items || !items.length) return `<span class="muted small">—</span>`;
+  return items.map(t => `<span class="badge ${cls}">${escapeHtml(t)}</span>`).join(" ");
+}
+
+function escapeHtml(str){
+  return String(str ?? "")
+    .replaceAll("&","&amp;")
+    .replaceAll("<","&lt;")
+    .replaceAll(">","&gt;")
+    .replaceAll('"',"&quot;")
+    .replaceAll("'","&#039;");
+}
+
+/* -----------------------------
+   Backend payload + API call
+------------------------------ */
+function makePayload(student){
+  return {
+    studentFirstName: student.firstName,
+    strengthTopics: student.topics.strengthTopics,
+    developingTopics: student.topics.developingTopics,
+    focusTopics: student.topics.focusTopics
+  };
+}
+
+async function fetchComment(payload){
+  const endpoint = safeStr($("endpoint").value) || "/api/comment";
+  const resp = await fetch(endpoint, {
+    method: "POST",
+    headers: { "Content-Type":"application/json" },
+    body: JSON.stringify(payload)
+  });
+
+  const text = await resp.text();
+  let json;
+  try { json = JSON.parse(text); } catch { json = { raw: text }; }
+
+  if (!resp.ok){
+    throw new Error(`HTTP ${resp.status}: ${json?.error || json?.message || text}`);
+  }
+  return json;
+}
+
+/* -----------------------------
+   Generate (selected / all) with concurrency
+------------------------------ */
+async function runGeneration(targetStudents){
+  STATE.stopRequested = false;
+  $("btnStop").disabled = false;
+  $("btnGenerateAll").disabled = true;
+  $("btnGenerateSelected").disabled = true;
+
+  const conc = clamp(Number($("concurrency").value) || 1, 1, 5);
+
+  setStatus(`Generating comments… (parallel: ${conc})`);
+  $("backendResp").value = "";
+
+  // Worker pool
+  const queue = [...targetStudents];
+  let done = 0;
+
+  async function worker(i){
+    while (queue.length && !STATE.stopRequested){
+      const s = queue.shift();
+      if (!s) return;
+
+      const payload = makePayload(s);
+      // show preview while running
+      $("studentSelect").value = s.id;
+      updatePromptPreview();
+
+      try{
+        const out = await fetchComment(payload);
+        const comment = safeStr(out.comment || out.output || out.text || out.raw);
+        s.comment = comment;
+        $("backendResp").value = JSON.stringify(out, null, 2);
+      }catch(err){
+        s.comment = `ERROR: ${safeStr(err.message || err)}`;
+        $("backendResp").value = s.comment;
+      }
+
+      done++;
+      renderStudentsTable();
+      setStatus(`Generating comments… ${done}/${targetStudents.length}`);
+    }
+  }
+
+  const workers = Array.from({length: conc}, (_, i) => worker(i));
+  await Promise.all(workers);
+
+  $("btnStop").disabled = true;
+  $("btnGenerateAll").disabled = false;
+  $("btnGenerateSelected").disabled = false;
+
+  if (STATE.stopRequested){
+    setStatus(`Stopped. Generated ${done}/${targetStudents.length}.`);
+  } else {
+    setStatus(`Done. Generated ${done}/${targetStudents.length}.`);
+  }
+}
+
+/* -----------------------------
+   Export
+------------------------------ */
+function buildExportRows(){
+  return STATE.students.map(s => ({
+    Name: s.name,
+    FirstName: s.firstName,
+    StrengthTopics: (s.topics.strengthTopics || []).join("; "),
+    DevelopingTopics: (s.topics.developingTopics || []).join("; "),
+    FocusTopics: (s.topics.focusTopics || []).join("; "),
+    Comment: s.comment || ""
+  }));
+}
+
+function download(filename, content, mime="text/plain"){
+  const blob = new Blob([content], { type: mime });
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(blob);
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(a.href), 1500);
+}
+
+/* -----------------------------
+   Button Wiring
+------------------------------ */
+$("btnLoad").addEventListener("click", async () => {
+  const f = $("file").files?.[0];
+  if (!f){ setStatus("Please choose an Excel file first."); return; }
+
+  try{
+    setStatus("Reading Excel…");
+    const { marks, qmap, qCols, topics } = await readExcel(f);
+
+    const thrStrong = clamp(Number($("thrStrong").value) || 0.8, 0, 1);
+    const thrFocus  = clamp(Number($("thrFocus").value) || 0.4, 0, 1);
+
+    // Build students
+    const students = marks.map((r, idx) => {
+      const name = safeStr(r.Name);
+      const topicsObj = buildStudentTopics(r, qCols, qmap, thrStrong, thrFocus);
+      return {
+        id: String(idx),
+        name: name || `Student ${idx+1}`,
+        firstName: firstNameFromFullName(name),
+        topics: topicsObj,
+        comment: "",
+        selected: idx === 0 // select first by default
+      };
+    });
+
+    STATE.fileName = f.name;
+    STATE.qmap = qmap;
+    STATE.topicsList = topics;
+    STATE.students = students;
+
+    updateKPIs();
+    renderStudentsTable();
+    renderStudentSelect();
+    syncSelectedStudent();
+    updatePromptPreview();
+
+    // Enable buttons
+    $("btnReset").disabled = false;
+    $("btnGenerateSelected").disabled = false;
+    $("btnGenerateAll").disabled = false;
+    $("btnExportCSV").disabled = false;
+    $("btnCopyTSV").disabled = false;
+
+    setStatus(`Loaded: ${f.name} (Students: ${students.length})`);
+  }catch(err){
+    console.error(err);
+    setStatus(`Error: ${safeStr(err.message || err)}`);
+  }
+});
+
+$("btnReset").addEventListener("click", () => {
+  STATE = { fileName:"", students:[], qmap:{}, topicsList:[], stopRequested:false };
+
+  $("file").value = "";
+  $("studentSelect").innerHTML = "";
+  $("studentSelect").disabled = true;
+  $("payload").value = "{}";
+  $("backendResp").value = "";
+  $("tbody").innerHTML = `<tr><td colspan="6" class="muted">Load an Excel file to see students here.</td></tr>`;
+  updateKPIs();
+
+  $("btnReset").disabled = true;
+  $("btnGenerateSelected").disabled = true;
+  $("btnGenerateAll").disabled = true;
+  $("btnStop").disabled = true;
+  $("btnExportCSV").disabled = true;
+  $("btnCopyTSV").disabled = true;
+
+  setStatus("No file loaded.");
+});
+
+$("btnStop").addEventListener("click", () => {
+  STATE.stopRequested = true;
+  setStatus("Stopping…");
+});
+
+$("btnGenerateSelected").addEventListener("click", async () => {
+  const selected = STATE.students.filter(s => s.selected);
+  if (!selected.length){ setStatus("Select at least one student."); return; }
+  await runGeneration(selected);
+});
+
+$("btnGenerateAll").addEventListener("click", async () => {
+  await runGeneration([...STATE.students]);
+});
+
+$("btnExportCSV").addEventListener("click", () => {
+  const rows = buildExportRows();
+  if (!rows.length) return;
+  const csv = toCSV(rows);
+  const base = STATE.fileName ? STATE.fileName.replace(/\.[^.]+$/, "") : "report";
+  download(`${base}_AI_Comments.csv`, csv, "text/csv");
+});
+
+$("btnCopyTSV").addEventListener("click", async () => {
+  const rows = buildExportRows();
+  if (!rows.length) return;
+  const tsv = toTSV(rows);
+  try{
+    await navigator.clipboard.writeText(tsv);
+    setStatus("Copied to clipboard (paste into Excel).");
+  }catch{
+    // fallback
+    $("backendResp").value = tsv;
+    setStatus("Could not access clipboard. TSV placed in the 'Backend response' box to copy manually.");
+  }
+});
+
+// Keep preview updated when thresholds change (recompute topics)
+function recomputeTopicsIfLoaded(){
+  if (!STATE.students.length) return;
+  const thrStrong = clamp(Number($("thrStrong").value) || 0.8, 0, 1);
+  const thrFocus  = clamp(Number($("thrFocus").value) || 0.4, 0, 1);
+
+  // We need the original marks to recompute perfectly; simplest is: ask user to reload if they change thresholds.
+  // But we *can* recompute from current topic lists only (not accurate), so we don't.
+  setStatus("Thresholds changed. Reload Excel to recompute topic bands.");
+}
+
+$("thrStrong").addEventListener("change", recomputeTopicsIfLoaded);
+$("thrFocus").addEventListener("change", recomputeTopicsIfLoaded);
+</script>
+</body>
+</html>
