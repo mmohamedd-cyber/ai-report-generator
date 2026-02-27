@@ -25,7 +25,7 @@ async function handlePost(context) {
 
     // If you set GEMINI_MODEL in Cloudflare, we’ll use it.
     // Otherwise default to a common one (but you should set it after /api/models works).
-    const model = safeStr(env.GEMINI_MODEL) || "gemini-1.5-flash-001";
+    const model = safeStr(env.GEMINI_MODEL) || "gemini-2.5-flash";
 
     const rules = [
       "You write short school report comments for a teacher.",
