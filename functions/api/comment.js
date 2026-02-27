@@ -1,29 +1,11 @@
 export async function onRequest(context) {
-  const url = new URL(context.request.url);
-
-  // Optional helper endpoint to discover what models YOUR key can use:
-  // GET /api/models
-  if (context.request.method === "GET" && url.pathname.endsWith("/api/models")) {
-    return handleListModels(context);
-  }
-
-  // Your main endpoint:
-  // POST /api/comment
-  if (!url.pathname.endsWith("/api/comment")) {
-    return new Response("Not found", { status: 404 });
-  }
-
   if (context.request.method !== "POST") {
     return new Response("Use POST", { status: 405 });
   }
-
-  return handleComment(context);
+  return handlePost(context);
 }
 
-/* ---------------------------
-   /api/comment (POST)
----------------------------- */
-async function handleComment(context) {
+async function handlePost(context) {
   try {
     const { request, env } = context;
 
@@ -41,19 +23,9 @@ async function handleComment(context) {
     const apiKey = env.GEMINI_API_KEY;
     if (!apiKey) return json({ error: "Missing GEMINI_API_KEY secret" }, 500);
 
-    // If you set GEMINI_MODEL in Cloudflare env vars, we’ll try that first.
-    // Otherwise we try a safe list of common model IDs.
-    const preferred = safeStr(env.GEMINI_MODEL || "");
-
-    const modelCandidates = [
-      preferred,
-      // Common stable IDs (often work with API key flow)
-      "gemini-1.5-flash-001",
-      "gemini-1.5-pro-001",
-      // Sometimes available depending on your account
-      "gemini-1.5-flash",
-      "gemini-1.5-pro"
-    ].filter(Boolean);
+    // If you set GEMINI_MODEL in Cloudflare, we’ll use it.
+    // Otherwise default to a common one (but you should set it after /api/models works).
+    const model = safeStr(env.GEMINI_MODEL) || "gemini-1.5-flash-001";
 
     const rules = [
       "You write short school report comments for a teacher.",
@@ -78,122 +50,50 @@ async function handleComment(context) {
       `Student data:\n${JSON.stringify(payload)}\n\n` +
       `Write the comment now.`;
 
-    // Try each model until one succeeds (avoids “404 model not found” headaches)
-    let lastErr = null;
+    const url =
+      `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
 
-    for (const model of modelCandidates) {
-      const endpoint =
-        `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(apiKey)}`;
+    const resp = await fetchWithRetry(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        contents: [{ parts: [{ text: prompt }] }]
+      })
+    });
 
-      const resp = await fetchWithRetry(endpoint, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ role: "user", parts: [{ text: prompt }] }]
-        })
-      });
-
-      const data = await safeJson(resp);
-
-      if (resp.ok) {
-        const text =
-          data?.candidates?.[0]?.content?.parts?.map(p => p.text).filter(Boolean).join("") || "";
-
-        return json({
-          comment: stripDigits(text).trim(),
-          // helpful during setup; remove later if you want
-          _modelUsed: model
-        });
-      }
-
-      // Save error + try next model
-      lastErr = { status: resp.status, data, model };
-      // If it's NOT 404, it might be a real issue (permissions, key, etc.) — still try next, but keep info.
-    }
-
-    // If none worked, return the most informative error we saw
-    return json(
-      {
-        error: "Gemini error",
-        message: "All candidate models failed. Use /api/models to see available model IDs for your key.",
-        lastError: lastErr
-      },
-      lastErr?.status || 500
-    );
-  } catch (err) {
-    return json({ error: "Server error", detail: String(err?.message || err) }, 500);
-  }
-}
-
-/* ---------------------------
-   /api/models (GET)
-   Lists models available to YOUR key
----------------------------- */
-async function handleListModels(context) {
-  try {
-    const apiKey = context.env.GEMINI_API_KEY;
-    if (!apiKey) return json({ error: "Missing GEMINI_API_KEY secret" }, 500);
-
-    const endpoint =
-      `https://generativelanguage.googleapis.com/v1beta/models?key=${encodeURIComponent(apiKey)}`;
-
-    const resp = await fetchWithRetry(endpoint, { method: "GET" });
-    const data = await safeJson(resp);
+    const raw = await resp.text();
+    let data;
+    try { data = JSON.parse(raw); } catch { data = { raw }; }
 
     if (!resp.ok) {
-      return json(
-        {
-          error: "Gemini error",
-          status: resp.status,
-          data
-        },
-        resp.status
-      );
+      // This will show the real reason (model not found, API not enabled, key invalid, etc.)
+      return json({ error: "Gemini error", status: resp.status, data }, resp.status);
     }
 
-    // Return just the model names for easy copy/paste
-    const names = (data?.models || []).map(m => m?.name).filter(Boolean);
+    const text =
+      data?.candidates?.[0]?.content?.parts?.map(p => p.text).filter(Boolean).join("") || "";
 
-    return json({
-      models: names,
-      note: "Pick one of these names and set GEMINI_MODEL in Cloudflare env vars (Production), then redeploy."
-    });
+    return json({ comment: stripDigits(text).trim() });
+
   } catch (err) {
     return json({ error: "Server error", detail: String(err?.message || err) }, 500);
   }
 }
 
-/* ---------------------------
-   Helpers
----------------------------- */
+/* Helpers */
 function json(obj, status = 200) {
   return new Response(JSON.stringify(obj), {
     status,
     headers: { "content-type": "application/json; charset=utf-8" }
   });
 }
-
-function safeStr(v) {
-  return String(v ?? "").trim();
-}
-
+function safeStr(v) { return String(v ?? "").trim(); }
 function safeArr(v) {
   if (!Array.isArray(v)) return [];
   return v.map(x => String(x ?? "").trim()).filter(Boolean).slice(0, 10);
 }
-
-function stripDigits(s) {
-  return String(s || "").replace(/[0-9]/g, "");
-}
-
-async function safeJson(resp) {
-  const text = await resp.text();
-  try { return JSON.parse(text); } catch { return { raw: text }; }
-}
-
-// Backoff for 429 rate limits
-function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
-
+function stripDigits(s) { return String(s || "").replace(/[0-9]/g, ""); }
+function sleep(ms){ return new Promise(r => setTimeout(r, ms)); }
 async function fetchWithRetry(url, options, retries = 3) {
   let last;
   for (let i = 0; i <= retries; i++) {
